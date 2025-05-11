@@ -1,15 +1,45 @@
 #pragma once
 #include "Subtitle.h"
 
-// Класс для формата WebVTT
+/*
+ * ──────────────────────────────────────────────────────────────────────────────
+ *  Класс VTTSubtitle
+ * ──────────────────────────────────────────────────────────────────────────────
+ *  Описывает субтитры в формате WebVTT (.vtt) — стандарт HTML5 и браузеров.
+ *
+ *  Структура блока:
+ *      WEBVTT
+ *
+ *      1
+ *      00:00:01.000 --> 00:00:03.000
+ *      Hello, world!
+ *
+ *  Время «HH:MM:SS.mmm», разделитель миллисекунд – точка.
+ *  Допустимы cue-идентификаторы (числа или строки), комментарии NOTE и стили,
+ *  но в рамках лабы мы обрабатываем лишь базовый набор:
+ *      • номер (или пропуск номера);
+ *      • тайм-код → текст (многострочный).
+ *
+ *  Общие операции offset(), collisions() реализованы в базовом Subtitle.
+ */
 class VTTSubtitle : public Subtitle {
 public:
-    // Чтение .vtt файла
-    void read(const std::string &filename) override;
-    // Запись .vtt файла
-    void write(const std::string &filename) const override;
-    // Удаление всех стилей (<c>, <v> и др.)
+    /* ────────────── Чтение ────────────── */
+    /// Прочитать .vtt-файл и заполнить вектор cues_.
+    /// Бросает std::runtime_error при ошибке формата/доступа.
+    void read(const std::string& filename) override;
+
+    /* ────────────── Запись ────────────── */
+    /// Сохранить текущие реплики в файл WebVTT.
+    /// Генерируется минимально-валидная шапка «WEBVTT\n\n».
+    void write(const std::string& filename) const override;
+
+    /* ────────────── Работа со стилями ────────────── */
+    /// Удалить встроенные теги <c>, <v>, <b>, <i> и любые другие <…>.
     void stripStyles() override;
-    // Добавление дефолтного стиля (например, обёртка в <c>)
-    void addDefaultStyle(const std::string &style) override;
+
+    /// Добавить дефолтный стиль. Пример:
+    ///   addDefaultStyle("<c.yellow>")
+    /// превращает «Text» → «<c.yellow>Text</c>».
+    void addDefaultStyle(const std::string& style) override;
 };

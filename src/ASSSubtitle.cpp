@@ -3,72 +3,152 @@
 #include <regex>
 #include <sstream>
 
-static long long parseASSTime(const std::string &field) {
-    int h,m,s,cs;
-    std::sscanf(field.c_str(), "%d:%d:%d.%d", &h,&m,&s,&cs);
-    return ((h*3600 + m*60 + s)*1000 + cs*10);
+/* ──────────────────────────────────────────────────────────────
+ *  Вспомогательные функции: конвертация времени
+ * ──────────────────────────────────────────────────────────────
+ *  Формат ASS хранит время как H:MM:SS.cc  (cc - сотые доли секунды)
+ *  Мы переводим его в/из миллисекунд для внутреннего хранения.
+ */
+
+// «01:02:03.45»  →  ms
+static long long parseASSTime(const std::string& field)
+{
+    int h, m, s, cs;                         // cs = centiseconds
+    std::sscanf(field.c_str(), "%d:%d:%d.%d", &h, &m, &s, &cs);
+    return ((h * 3600 + m * 60 + s) * 1000 + cs * 10);
 }
-static std::string formatASSTime(long long ms) {
-    int h = ms/3600000;
-    ms %= 3600000;
-    int m = ms/60000;
-    ms %= 60000;
-    int s = ms/1000;
-    ms %= 1000;
-    int cs = ms/10;
-    char buf[64]; std::sprintf(buf, "%d:%02d:%02d.%02d", h, m, s, cs);
+
+// ms  →  «1:02:03.45»  (однозначные часы без ведущего нуля, как в спецификации)
+static std::string formatASSTime(long long ms)
+{
+    int h = ms / 3600000;  ms %= 3600000;
+    int m = ms / 60000;    ms %= 60000;
+    int s = ms / 1000;     ms %= 1000;
+    int cs = ms / 10;
+    char buf[32];
+    std::sprintf(buf, "%d:%02d:%02d.%02d", h, m, s, cs);
     return buf;
 }
 
-void ASSSubtitle::read(const std::string &filename) {
+/* ──────────────────────────────────────────────────────────────
+ *  Чтение .ass / .ssa
+ * ────────────────────────────────────────────────────────────── */
+
+void ASSSubtitle::read(const std::string& filename)
+{
     std::ifstream ifs(filename);
+    if (!ifs.is_open())
+        throw std::runtime_error("Cannot open " + filename);
+
     cues_.clear();
+
     std::string line;
-    bool inEvents = false;
-    std::vector<std::string> formatFields;
-    while (std::getline(ifs, line)) {
+    bool inEvents = false;                 // мы внутри секции [Events]?
+    std::vector<std::string> formatFields; // порядок колонок после «Format:»
+
+    while (std::getline(ifs, line))
+    {
+        // Ждём секцию [Events]
         if (line.rfind("[Events]", 0) == 0) { inEvents = true; continue; }
         if (!inEvents) continue;
-        if (line.rfind("Format:", 0) == 0) {
-            std::stringstream ss(line.substr(7));
+
+        // Запоминаем строку «Format: …»
+        if (line.rfind("Format:", 0) == 0)
+        {
+            std::stringstream ss(line.substr(7));  // пропустить «Format:»
             std::string token;
-            while (std::getline(ss, token, ',')) formatFields.push_back(token);
+            while (std::getline(ss, token, ','))
+                formatFields.push_back(token);
             continue;
         }
-        if (line.rfind("Dialogue:", 0) == 0) {
-            std::stringstream ss(line.substr(9));
+
+        // Строки «Dialogue: …»
+        if (line.rfind("Dialogue:", 0) == 0)
+        {
+            std::stringstream ss(line.substr(9));  // пропустить «Dialogue:»
             std::vector<std::string> values;
             std::string field;
-            for (size_t i=0; i<formatFields.size()-1; ++i) { std::getline(ss, field, ','); values.push_back(field); }
-            std::getline(ss, field); values.push_back(field);
-            Cue cue; cue.index = cues_.size()+1;
-            int iStart = std::distance(formatFields.begin(), std::find(formatFields.begin(), formatFields.end(), "Start"));
-            int iEnd   = std::distance(formatFields.begin(), std::find(formatFields.begin(), formatFields.end(), "End"));
+
+            // Вытаскиваем все значения, кроме последнего (Text) по запятой
+            for (size_t i = 0; i < formatFields.size() - 1; ++i)
+            {
+                std::getline(ss, field, ',');
+                values.push_back(field);
+            }
+            std::getline(ss, field);               // последнее поле до \n
+            values.push_back(field);               // это будет Text
+
+            Cue cue;
+            cue.index = static_cast<int>(cues_.size()) + 1;
+
+            // Позиции колонок «Start» и «End» в векторе formatFields
+            int iStart = std::distance(formatFields.begin(),
+                                       std::find(formatFields.begin(), formatFields.end(), "Start"));
+            int iEnd   = std::distance(formatFields.begin(),
+                                       std::find(formatFields.begin(), formatFields.end(), "End"));
+
             cue.start_ms = parseASSTime(values[iStart]);
             cue.end_ms   = parseASSTime(values[iEnd]);
-            cue.text = values.back();
+            cue.text     = values.back();
+
             cues_.push_back(cue);
         }
     }
 }
 
-void ASSSubtitle::write(const std::string &filename) const {
+/* ──────────────────────────────────────────────────────────────
+ *  Запись .ass
+ * ────────────────────────────────────────────────────────────── */
+
+void ASSSubtitle::write(const std::string& filename) const
+{
     std::ofstream ofs(filename);
-    ofs << "[Script Info]\n; Generated by subtitle_converter\n";
-    ofs << "[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n";
-    ofs << "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n";
-    ofs << "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n";
-    for (auto &c : cues_) {
-        ofs << "Dialogue: 0," << formatASSTime(c.start_ms) << "," << formatASSTime(c.end_ms)
-            << ",Default,NTP,0000,0000,0000,," << c.text << "\n";
+    if (!ofs.is_open())
+        throw std::runtime_error("Cannot write " + filename);
+
+    // Минимальная «шапка» (Script Info + один стиль)
+    ofs << "[Script Info]\n"
+        << "; Generated by subtitle_converter\n\n";
+
+    ofs << "[V4+ Styles]\n"
+        << "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,"
+        << "OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,"
+        << "ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,"
+        << "Alignment,MarginL,MarginR,MarginV,Encoding\n";
+
+    ofs << "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,"
+        << "&H64000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\n";
+
+    // Секция Events
+    ofs << "[Events]\n"
+        << "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n";
+
+    for (const auto& c : cues_)
+    {
+        ofs << "Dialogue: 0,"
+            << formatASSTime(c.start_ms) << ','
+            << formatASSTime(c.end_ms)   << ",Default,NTP,0000,0000,0000,,"
+            << c.text << '\n';
     }
 }
 
-void ASSSubtitle::stripStyles() {
-    std::regex tag(R"(\{[^}]+\})");
-    for (auto &c : cues_) c.text = std::regex_replace(c.text, tag, "");
+/* ──────────────────────────────────────────────────────────────
+ *  stripStyles() — удалить { … } внутри текста
+ * ────────────────────────────────────────────────────────────── */
+
+void ASSSubtitle::stripStyles()
+{
+    std::regex tag(R"(\{[^}]+\})");        // всё между фигурными скобками
+    for (auto& c : cues_)
+        c.text = std::regex_replace(c.text, tag, "");
 }
 
-void ASSSubtitle::addDefaultStyle(const std::string &style) {
-    for (auto &c : cues_) c.text = "{" + style + "}" + c.text;
+/* ──────────────────────────────────────────────────────────────
+ *  addDefaultStyle() — добавить единый override-тег перед текстом
+ * ────────────────────────────────────────────────────────────── */
+
+void ASSSubtitle::addDefaultStyle(const std::string& style)
+{
+    for (auto& c : cues_)
+        c.text = '{' + style + '}' + c.text;
 }

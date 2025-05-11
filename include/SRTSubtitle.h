@@ -1,10 +1,50 @@
 #pragma once
 #include "Subtitle.h"
 
+/*
+ * ──────────────────────────────────────────────────────────────────────────────
+ *  Класс SRTSubtitle
+ * ──────────────────────────────────────────────────────────────────────────────
+ *  Представляет субтитры в формате SubRip (.srt) —
+ *  «классический» текстовый формат, где каждая реплика задаётся блоком:
+ *
+ *      1
+ *      00:00:01,000 --> 00:00:03,000
+ *      Hello, world!
+ *
+ *  Время хранится в миллисекундах, конвертируется в строку
+ *  «HH:MM:SS,mmm» при записи.
+ *
+ *  Общие операции, общие для всех форматов (offset, collisions),
+ *  реализованы в базовом классе Subtitle.
+ */
 class SRTSubtitle : public Subtitle {
 public:
-    void read(const std::string &filename) override;
-    void write(const std::string &filename) const override;
+    /**
+     * Прочитать .srt-файл и заполнить вектор cues_.
+     * @param filename  путь к входному SRT-файлу.
+     * @throws std::runtime_error при ошибке чтения или некорректном формате.
+     */
+    void read(const std::string& filename) override;
+
+    /**
+     * Сохранить текущие реплики в файл формата .srt.
+     * @param filename  путь к выходному файлу.
+     */
+    void write(const std::string& filename) const override;
+
+    /**
+     * Удалить все HTML-подобные теги (<b>, <i>, <font …> и др.) в тексте.
+     * Сам текст, переносы строк и тайм-коды остаются без изменений.
+     */
     void stripStyles() override;
-    void addDefaultStyle(const std::string &style) override;
+
+    /**
+     * Добавить единый «дефолтный» стиль ко всем репликам.
+     * Например,  addDefaultStyle("<b>")  превратит  «Text» → «<b>Text</b>».
+     *
+     * @param style  строка-префикс (открывающий тег, без закрывающего слеша);
+     *               закрытие того же тега автоматически добавляется в конец.
+     */
+    void addDefaultStyle(const std::string& style) override;
 };
